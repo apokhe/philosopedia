@@ -1,4 +1,4 @@
-import {AppBskyFeedDefs, AppBskyFeedPost} from '@atproto/api'
+import {type AppBskyFeedDefs, AppBskyFeedPost} from '@atproto/api'
 import * as bcp47Match from 'bcp-47-match'
 import lande from 'lande'
 
@@ -213,6 +213,8 @@ export function sanitizeAppLanguageSetting(appLanguage: string): AppLanguage {
         return AppLanguage.pl
       case 'pt-BR':
         return AppLanguage.pt_BR
+      case 'pt-PT':
+        return AppLanguage.pt_PT
       case 'ro':
         return AppLanguage.ro
       case 'ru':

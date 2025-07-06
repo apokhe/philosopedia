@@ -22,7 +22,14 @@ import {
   type NotificationType,
 } from './types'
 
-const GROUPABLE_REASONS = ['like', 'repost', 'follow']
+const GROUPABLE_REASONS = [
+  'like',
+  'repost',
+  'follow',
+  'like-via-repost',
+  'repost-via-repost',
+  'subscribed-post',
+]
 const MS_1HR = 1e3 * 60 * 60
 const MS_2DAY = MS_1HR * 48
 
@@ -138,7 +145,8 @@ export function groupNotifications(
           Math.abs(ts2 - ts) < MS_2DAY &&
           notif.reason === groupedNotif.notification.reason &&
           notif.reasonSubject === groupedNotif.notification.reasonSubject &&
-          notif.author.did !== groupedNotif.notification.author.did
+          (notif.author.did !== groupedNotif.notification.author.did ||
+            notif.reason === 'subscribed-post')
         ) {
           const nextIsFollowBack =
             notif.reason === 'follow' && notif.author.viewer?.following
@@ -244,7 +252,10 @@ function toKnownType(
     notif.reason === 'follow' ||
     notif.reason === 'starterpack-joined' ||
     notif.reason === 'verified' ||
-    notif.reason === 'unverified'
+    notif.reason === 'unverified' ||
+    notif.reason === 'like-via-repost' ||
+    notif.reason === 'repost-via-repost' ||
+    notif.reason === 'subscribed-post'
   ) {
     return notif.reason as NotificationType
   }
@@ -255,9 +266,19 @@ function getSubjectUri(
   type: NotificationType,
   notif: AppBskyNotificationListNotifications.Notification,
 ): string | undefined {
-  if (type === 'reply' || type === 'quote' || type === 'mention') {
+  if (
+    type === 'reply' ||
+    type === 'quote' ||
+    type === 'mention' ||
+    type === 'subscribed-post'
+  ) {
     return notif.uri
-  } else if (type === 'post-like' || type === 'repost') {
+  } else if (
+    type === 'post-like' ||
+    type === 'repost' ||
+    type === 'like-via-repost' ||
+    type === 'repost-via-repost'
+  ) {
     if (
       bsky.dangerousIsType<AppBskyFeedRepost.Record>(
         notif.record,

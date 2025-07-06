@@ -1,11 +1,13 @@
-import React from 'react'
+import {useEffect} from 'react'
 import * as Notifications from 'expo-notifications'
+import {AtUri} from '@atproto/api'
+import {msg} from '@lingui/macro'
+import {useLingui} from '@lingui/react'
 import {CommonActions, useNavigation} from '@react-navigation/native'
 import {useQueryClient} from '@tanstack/react-query'
 
 import {useAccountSwitcher} from '#/lib/hooks/useAccountSwitcher'
 import {type NavigationProp} from '#/lib/routes/types'
-import {logEvent} from '#/lib/statsig/statsig'
 import {Logger} from '#/logger'
 import {isAndroid} from '#/platform/detection'
 import {useCurrentConvoId} from '#/state/messages/current-convo-id'
@@ -17,7 +19,7 @@ import {useLoggedOutViewControls} from '#/state/shell/logged-out'
 import {useCloseAllActiveElements} from '#/state/util'
 import {resetToTab} from '#/Navigation'
 
-type NotificationReason =
+export type NotificationReason =
   | 'like'
   | 'repost'
   | 'follow'
@@ -26,8 +28,19 @@ type NotificationReason =
   | 'quote'
   | 'chat-message'
   | 'starterpack-joined'
+  | 'like-via-repost'
+  | 'repost-via-repost'
+  | 'verified'
+  | 'unverified'
+  | 'subscribed-post'
 
+/**
+ * Manually overridden type, but retains the possibility of
+ * `notification.request.trigger.payload` being `undefined`, as specified in
+ * the source types.
+ */
 type NotificationPayload =
+  | undefined
   | {
       reason: Exclude<NotificationReason, 'chat-message'>
       uri: string
@@ -48,7 +61,7 @@ const DEFAULT_HANDLER_OPTIONS = {
 } satisfies Notifications.NotificationBehavior
 
 // These need to stay outside the hook to persist between account switches
-let storedPayload: NotificationPayload | undefined
+let storedPayload: NotificationPayload
 let prevDate = 0
 
 const logger = Logger.create(Logger.Context.Notifications)
@@ -61,34 +74,110 @@ export function useNotificationsHandler() {
   const {currentConvoId} = useCurrentConvoId()
   const {setShowLoggedOut} = useLoggedOutViewControls()
   const closeAllActiveElements = useCloseAllActiveElements()
+  const {_} = useLingui()
 
   // On Android, we cannot control which sound is used for a notification on Android
   // 28 or higher. Instead, we have to configure a notification channel ahead of time
   // which has the sounds we want in the configuration for that channel. These two
   // channels allow for the mute/unmute functionality we want for the background
   // handler.
-  React.useEffect(() => {
+  useEffect(() => {
     if (!isAndroid) return
+    // assign both chat notifications to a group
+    // NOTE: I don't think that it will retroactively move them into the group
+    // if the channels already exist. no big deal imo -sfn
+    const CHAT_GROUP = 'chat'
+    Notifications.setNotificationChannelGroupAsync(CHAT_GROUP, {
+      name: _(msg`Chat`),
+      description: _(
+        msg`You can choose whether chat notifications have sound in the chat settings within the app`,
+      ),
+    })
     Notifications.setNotificationChannelAsync('chat-messages', {
-      name: 'Chat',
+      name: _(msg`Chat messages - sound`),
+      groupId: CHAT_GROUP,
       importance: Notifications.AndroidImportance.MAX,
       sound: 'dm.mp3',
       showBadge: true,
       vibrationPattern: [250],
       lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
     })
-
     Notifications.setNotificationChannelAsync('chat-messages-muted', {
-      name: 'Chat - Muted',
+      name: _(msg`Chat messages - silent`),
+      groupId: CHAT_GROUP,
       importance: Notifications.AndroidImportance.MAX,
       sound: null,
       showBadge: true,
       vibrationPattern: [250],
       lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
     })
-  }, [])
 
-  React.useEffect(() => {
+    Notifications.setNotificationChannelAsync(
+      'like' satisfies NotificationReason,
+      {
+        name: _(msg`Likes`),
+        importance: Notifications.AndroidImportance.HIGH,
+      },
+    )
+    Notifications.setNotificationChannelAsync(
+      'repost' satisfies NotificationReason,
+      {
+        name: _(msg`Reposts`),
+        importance: Notifications.AndroidImportance.HIGH,
+      },
+    )
+    Notifications.setNotificationChannelAsync(
+      'reply' satisfies NotificationReason,
+      {
+        name: _(msg`Replies`),
+        importance: Notifications.AndroidImportance.HIGH,
+      },
+    )
+    Notifications.setNotificationChannelAsync(
+      'mention' satisfies NotificationReason,
+      {
+        name: _(msg`Mentions`),
+        importance: Notifications.AndroidImportance.HIGH,
+      },
+    )
+    Notifications.setNotificationChannelAsync(
+      'quote' satisfies NotificationReason,
+      {
+        name: _(msg`Quotes`),
+        importance: Notifications.AndroidImportance.HIGH,
+      },
+    )
+    Notifications.setNotificationChannelAsync(
+      'follow' satisfies NotificationReason,
+      {
+        name: _(msg`New followers`),
+        importance: Notifications.AndroidImportance.HIGH,
+      },
+    )
+    Notifications.setNotificationChannelAsync(
+      'like-via-repost' satisfies NotificationReason,
+      {
+        name: _(msg`Likes of your reposts`),
+        importance: Notifications.AndroidImportance.HIGH,
+      },
+    )
+    Notifications.setNotificationChannelAsync(
+      'repost-via-repost' satisfies NotificationReason,
+      {
+        name: _(msg`Reposts of your reposts`),
+        importance: Notifications.AndroidImportance.HIGH,
+      },
+    )
+    Notifications.setNotificationChannelAsync(
+      'subscribed-post' satisfies NotificationReason,
+      {
+        name: _(msg`Activity from others`),
+        importance: Notifications.AndroidImportance.HIGH,
+      },
+    )
+  }, [_])
+
+  useEffect(() => {
     const handleNotification = (payload?: NotificationPayload) => {
       if (!payload) return
 
@@ -139,6 +228,23 @@ export function useNotificationsHandler() {
         }
       } else {
         switch (payload.reason) {
+          case 'subscribed-post':
+            const urip = new AtUri(payload.uri)
+            if (urip.collection === 'app.bsky.feed.post') {
+              setTimeout(() => {
+                // @ts-expect-error types are weird here
+                navigation.navigate('HomeTab', {
+                  screen: 'PostThread',
+                  params: {
+                    name: urip.host,
+                    rkey: urip.rkey,
+                  },
+                })
+              }, 500)
+            } else {
+              resetToTab('NotificationsTab')
+            }
+            break
           case 'like':
           case 'repost':
           case 'follow':
@@ -146,6 +252,11 @@ export function useNotificationsHandler() {
           case 'quote':
           case 'reply':
           case 'starterpack-joined':
+          case 'like-via-repost':
+          case 'repost-via-repost':
+          case 'verified':
+          case 'unverified':
+          default:
             resetToTab('NotificationsTab')
             break
           // TODO implement these after we have an idea of how to handle each individual case
@@ -192,6 +303,11 @@ export function useNotificationsHandler() {
         logger.debug('Notifications: received', {e})
 
         const payload = e.request.trigger.payload as NotificationPayload
+
+        if (!payload) {
+          return DEFAULT_HANDLER_OPTIONS
+        }
+
         if (
           payload.reason === 'chat-message' &&
           payload.recipientDid === currentAccount?.did
@@ -229,15 +345,36 @@ export function useNotificationsHandler() {
           'type' in e.notification.request.trigger &&
           e.notification.request.trigger.type === 'push'
         ) {
+          const payload = e.notification.request.trigger
+            .payload as NotificationPayload
+
+          if (!payload) {
+            logger.error('useNotificationsHandler: received no payload', {
+              identifier: e.notification.request.identifier,
+            })
+            return
+          }
+          if (!payload.reason) {
+            logger.error('useNotificationsHandler: received unknown payload', {
+              payload,
+              identifier: e.notification.request.identifier,
+            })
+            return
+          }
+
           logger.debug(
             'User pressed a notification, opening notifications tab',
             {},
           )
-          logEvent('notifications:openApp', {})
+          logger.metric(
+            'notifications:openApp',
+            {reason: payload.reason},
+            {statsig: false},
+          )
+
           invalidateCachedUnreadPage()
-          const payload = e.notification.request.trigger
-            .payload as NotificationPayload
           truncateAndInvalidate(queryClient, RQKEY_NOTIFS('all'))
+
           if (
             payload.reason === 'mention' ||
             payload.reason === 'quote' ||
@@ -245,10 +382,12 @@ export function useNotificationsHandler() {
           ) {
             truncateAndInvalidate(queryClient, RQKEY_NOTIFS('mentions'))
           }
+
           logger.debug('Notifications: handleNotification', {
             content: e.notification.request.content,
             payload: e.notification.request.trigger.payload,
           })
+
           handleNotification(payload)
           Notifications.dismissAllNotificationsAsync()
         }

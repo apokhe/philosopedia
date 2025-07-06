@@ -33,6 +33,7 @@ import {
   ensureGeolocationResolved,
   Provider as GeolocationProvider,
 } from '#/state/geolocation'
+import {GlobalGestureEventsProvider} from '#/state/global-gesture-events'
 import {Provider as HomeBadgeProvider} from '#/state/home-badge'
 import {Provider as InvitesStateProvider} from '#/state/invites'
 import {Provider as LightboxStateProvider} from '#/state/lightbox'
@@ -43,6 +44,7 @@ import {Provider as PrefsStateProvider} from '#/state/preferences'
 import {Provider as LabelDefsProvider} from '#/state/preferences/label-defs'
 import {Provider as ModerationOptsProvider} from '#/state/preferences/moderation-opts'
 import {Provider as UnreadNotifsProvider} from '#/state/queries/notifications/unread'
+import {Provider as ServiceAccountManager} from '#/state/service-config'
 import {
   Provider as SessionProvider,
   type SessionAccount,
@@ -57,9 +59,7 @@ import {Provider as ProgressGuideProvider} from '#/state/shell/progress-guide'
 import {Provider as SelectedFeedProvider} from '#/state/shell/selected-feed'
 import {Provider as StarterPackProvider} from '#/state/shell/starter-pack'
 import {Provider as HiddenRepliesProvider} from '#/state/threadgate-hidden-replies'
-import {Provider as TrendingConfigProvider} from '#/state/trending-config'
 import {TestCtrls} from '#/view/com/testing/TestCtrls'
-import {Provider as VideoVolumeProvider} from '#/view/com/util/post-embeds/VideoVolumeContext'
 import * as Toast from '#/view/com/util/Toast'
 import {Shell} from '#/view/shell'
 import {ThemeProvider as Alf} from '#/alf'
@@ -69,9 +69,11 @@ import {NuxDialogs} from '#/components/dialogs/nuxs'
 import {useStarterPackEntry} from '#/components/hooks/useStarterPackEntry'
 import {Provider as IntentDialogProvider} from '#/components/intents/IntentDialogs'
 import {Provider as PortalProvider} from '#/components/Portal'
+import {Provider as VideoVolumeProvider} from '#/components/Post/Embed/VideoEmbed/VideoVolumeContext'
 import {Splash} from '#/Splash'
 import {BottomSheetProvider} from '../modules/bottom-sheet'
 import {BackgroundNotificationPreferencesProvider} from '../modules/expo-background-notification-handler/src/BackgroundNotificationHandlerProvider'
+import {Provider as HideBottomBarBorderProvider} from './lib/hooks/useHideBottomBarBorder'
 
 SplashScreen.preventAutoHideAsync()
 if (isIOS) {
@@ -149,16 +151,20 @@ function InnerApp() {
                                         <BackgroundNotificationPreferencesProvider>
                                           <MutedThreadsProvider>
                                             <ProgressGuideProvider>
-                                              <TrendingConfigProvider>
-                                                <GestureHandlerRootView
-                                                  style={s.h100pct}>
-                                                  <IntentDialogProvider>
-                                                    <TestCtrls />
-                                                    <Shell />
-                                                    <NuxDialogs />
-                                                  </IntentDialogProvider>
-                                                </GestureHandlerRootView>
-                                              </TrendingConfigProvider>
+                                              <ServiceAccountManager>
+                                                <HideBottomBarBorderProvider>
+                                                  <GestureHandlerRootView
+                                                    style={s.h100pct}>
+                                                    <GlobalGestureEventsProvider>
+                                                      <IntentDialogProvider>
+                                                        <TestCtrls />
+                                                        <Shell />
+                                                        <NuxDialogs />
+                                                      </IntentDialogProvider>
+                                                    </GlobalGestureEventsProvider>
+                                                  </GestureHandlerRootView>
+                                                </HideBottomBarBorderProvider>
+                                              </ServiceAccountManager>
                                             </ProgressGuideProvider>
                                           </MutedThreadsProvider>
                                         </BackgroundNotificationPreferencesProvider>

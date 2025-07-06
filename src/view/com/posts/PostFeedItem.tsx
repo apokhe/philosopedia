@@ -33,12 +33,15 @@ import {
   usePostShadow,
 } from '#/state/cache/post-shadow'
 import {useFeedFeedbackContext} from '#/state/feed-feedback'
-import {precacheProfile} from '#/state/queries/profile'
+import {unstableCacheProfileView} from '#/state/queries/profile'
 import {useSession} from '#/state/session'
 import {useMergedThreadgateHiddenReplies} from '#/state/threadgate-hidden-replies'
+import {
+  buildPostSourceKey,
+  setUnstablePostSource,
+} from '#/state/unstable-post-source'
 import {FeedNameText} from '#/view/com/util/FeedInfoText'
-import {PostCtrls} from '#/view/com/util/post-ctrls/PostCtrls'
-import {PostEmbeds, PostEmbedViewContext} from '#/view/com/util/post-embeds'
+import {Link, TextLinkOnWebOnly} from '#/view/com/util/Link'
 import {PostMeta} from '#/view/com/util/PostMeta'
 import {Text} from '#/view/com/util/text/Text'
 import {PreviewableUserAvatar} from '#/view/com/util/UserAvatar'
@@ -49,11 +52,15 @@ import {ContentHider} from '#/components/moderation/ContentHider'
 import {LabelsOnMyPost} from '#/components/moderation/LabelsOnMe'
 import {PostAlerts} from '#/components/moderation/PostAlerts'
 import {type AppModerationCause} from '#/components/Pills'
+import {Embed} from '#/components/Post/Embed'
+import {PostEmbedViewContext} from '#/components/Post/Embed/types'
+import {ShowMoreTextButton} from '#/components/Post/ShowMoreTextButton'
+import {PostControls} from '#/components/PostControls'
+import {DiscoverDebug} from '#/components/PostControls/DiscoverDebug'
 import {ProfileHoverCard} from '#/components/ProfileHoverCard'
 import {RichText} from '#/components/RichText'
 import {SubtleWebHover} from '#/components/SubtleWebHover'
 import * as bsky from '#/types/bsky'
-import {Link, TextLink, TextLinkOnWebOnly} from '../util/Link'
 
 interface FeedItemProps {
   record: AppBskyFeedPost.Record
@@ -70,6 +77,7 @@ interface FeedItemProps {
   isThreadLastChild?: boolean
   isThreadParent?: boolean
   feedContext: string | undefined
+  reqId: string | undefined
   hideTopBorder?: boolean
   isParentBlocked?: boolean
   isParentNotFound?: boolean
@@ -80,6 +88,7 @@ export function PostFeedItem({
   record,
   reason,
   feedContext,
+  reqId,
   moderation,
   parentAuthor,
   showReplyTo,
@@ -117,6 +126,7 @@ export function PostFeedItem({
         record={record}
         reason={reason}
         feedContext={feedContext}
+        reqId={reqId}
         richText={richText}
         parentAuthor={parentAuthor}
         showReplyTo={showReplyTo}
@@ -140,6 +150,7 @@ let FeedItemInner = ({
   record,
   reason,
   feedContext,
+  reqId,
   richText,
   moderation,
   parentAuthor,
@@ -169,13 +180,14 @@ let FeedItemInner = ({
     const urip = new AtUri(post.uri)
     return makeProfileLink(post.author, 'post', urip.rkey)
   }, [post.uri, post.author])
-  const {sendInteraction} = useFeedFeedbackContext()
+  const {sendInteraction, feedDescriptor} = useFeedFeedbackContext()
 
-  const onPressReply = useCallback(() => {
+  const onPressReply = () => {
     sendInteraction({
       item: post.uri,
       event: 'app.bsky.feed.defs#interactionReply',
       feedContext,
+      reqId,
     })
     openComposer({
       replyTo: {
@@ -187,40 +199,53 @@ let FeedItemInner = ({
         moderation,
       },
     })
-  }, [post, record, openComposer, moderation, sendInteraction, feedContext])
+  }
 
-  const onOpenAuthor = useCallback(() => {
+  const onOpenAuthor = () => {
     sendInteraction({
       item: post.uri,
       event: 'app.bsky.feed.defs#clickthroughAuthor',
       feedContext,
+      reqId,
     })
-  }, [sendInteraction, post, feedContext])
+  }
 
-  const onOpenReposter = useCallback(() => {
+  const onOpenReposter = () => {
     sendInteraction({
       item: post.uri,
       event: 'app.bsky.feed.defs#clickthroughReposter',
       feedContext,
+      reqId,
     })
-  }, [sendInteraction, post, feedContext])
+  }
 
-  const onOpenEmbed = useCallback(() => {
+  const onOpenEmbed = () => {
     sendInteraction({
       item: post.uri,
       event: 'app.bsky.feed.defs#clickthroughEmbed',
       feedContext,
+      reqId,
     })
-  }, [sendInteraction, post, feedContext])
+  }
 
-  const onBeforePress = useCallback(() => {
+  const onBeforePress = () => {
     sendInteraction({
       item: post.uri,
       event: 'app.bsky.feed.defs#clickthroughItem',
       feedContext,
+      reqId,
     })
-    precacheProfile(queryClient, post.author)
-  }, [queryClient, post, sendInteraction, feedContext])
+    unstableCacheProfileView(queryClient, post.author)
+    setUnstablePostSource(buildPostSourceKey(post.uri, post.author.handle), {
+      feed: feedDescriptor,
+      post: {
+        post,
+        reason: AppBskyFeedDefs.isReasonRepost(reason) ? reason : undefined,
+        feedContext,
+        reqId,
+      },
+    })
+  }
 
   const outerStyles = [
     styles.outer,
@@ -252,6 +277,15 @@ let FeedItemInner = ({
     : undefined
 
   const {isActive: live} = useActorStatus(post.author)
+
+  const viaRepost = useMemo(() => {
+    if (AppBskyFeedDefs.isReasonRepost(reason) && reason.uri && reason.cid) {
+      return {
+        uri: reason.uri,
+        cid: reason.cid,
+      }
+    }
+  }, [reason])
 
   return (
     <Link
@@ -285,7 +319,7 @@ let FeedItemInner = ({
           )}
         </View>
 
-        <View style={{paddingTop: 12, flexShrink: 1}}>
+        <View style={{paddingTop: 10, flexShrink: 1}}>
           {isReasonFeedSource(reason) ? (
             <Link href={reason.href}>
               <Text
@@ -335,7 +369,7 @@ let FeedItemInner = ({
                 ) : (
                   <Trans>
                     Reposted by{' '}
-                    <ProfileHoverCard inline did={reason.by.did}>
+                    <ProfileHoverCard did={reason.by.did}>
                       <TextLinkOnWebOnly
                         type="sm-bold"
                         style={pal.textLight}
@@ -430,17 +464,21 @@ let FeedItemInner = ({
             post={post}
             threadgateRecord={threadgateRecord}
           />
-          <PostCtrls
+          <PostControls
             post={post}
             record={record}
             richText={richText}
             onPressReply={onPressReply}
             logContext="FeedItem"
             feedContext={feedContext}
+            reqId={reqId}
             threadgateRecord={threadgateRecord}
             onShowLess={onShowLess}
+            viaRepost={viaRepost}
           />
         </View>
+
+        <DiscoverDebug feedContext={feedContext} />
       </View>
     </Link>
   )
@@ -464,8 +502,6 @@ let PostContent = ({
   post: AppBskyFeedDefs.PostView
   threadgateRecord?: AppBskyFeedThreadgate.Record
 }): React.ReactNode => {
-  const pal = usePalette('default')
-  const {_} = useLingui()
   const {currentAccount} = useSession()
   const [limitLines, setLimitLines] = useState(
     () => countLines(richText.text) >= MAX_POST_LINES,
@@ -510,7 +546,7 @@ let PostContent = ({
         additionalCauses={additionalPostAlerts}
       />
       {richText.text ? (
-        <View style={styles.postTextContainer}>
+        <>
           <RichText
             enableTags
             testID="postText"
@@ -520,19 +556,14 @@ let PostContent = ({
             authorHandle={postAuthor.handle}
             shouldProxyLinks={true}
           />
-        </View>
-      ) : undefined}
-      {limitLines ? (
-        <TextLink
-          text={_(msg`Show More`)}
-          style={pal.link}
-          onPress={onPressShowMore}
-          href="#"
-        />
+          {limitLines && (
+            <ShowMoreTextButton style={[a.text_md]} onPress={onPressShowMore} />
+          )}
+        </>
       ) : undefined}
       {postEmbed ? (
         <View style={[a.pb_xs]}>
-          <PostEmbeds
+          <Embed
             embed={postEmbed}
             moderation={moderation}
             onOpen={onOpenEmbed}
@@ -570,7 +601,7 @@ function ReplyToLabel({
       label = (
         <Trans context="description">
           Reply to{' '}
-          <ProfileHoverCard inline did={profile.did}>
+          <ProfileHoverCard did={profile.did}>
             <TextLinkOnWebOnly
               type="md"
               style={pal.textLight}
@@ -629,7 +660,6 @@ const styles = StyleSheet.create({
   includeReason: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 2,
     marginBottom: 2,
     marginLeft: -16,
   },
@@ -651,13 +681,6 @@ const styles = StyleSheet.create({
   alert: {
     marginTop: 6,
     marginBottom: 6,
-  },
-  postTextContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    paddingBottom: 2,
-    overflow: 'hidden',
   },
   contentHiderChild: {
     marginTop: 6,

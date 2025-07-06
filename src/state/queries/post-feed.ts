@@ -24,6 +24,7 @@ import {HomeFeedAPI} from '#/lib/api/feed/home'
 import {LikesFeedAPI} from '#/lib/api/feed/likes'
 import {ListFeedAPI} from '#/lib/api/feed/list'
 import {MergeFeedAPI} from '#/lib/api/feed/merge'
+import {PostListFeedAPI} from '#/lib/api/feed/posts'
 import {type FeedAPI, type ReasonFeedSource} from '#/lib/api/feed/types'
 import {aggregateUserInterests} from '#/lib/api/feed/utils'
 import {FeedTuner, type FeedTunerFn} from '#/lib/api/feed-manip'
@@ -53,6 +54,7 @@ export type AuthorFilter =
   | 'posts_with_video'
 type FeedUri = string
 type ListUri = string
+type PostsUriList = string
 
 export type FeedDescriptor =
   | 'following'
@@ -60,6 +62,7 @@ export type FeedDescriptor =
   | `feedgen|${FeedUri}`
   | `likes|${ActorDid}`
   | `list|${ListUri}`
+  | `posts|${PostsUriList}`
   | 'demo'
 export interface FeedParams {
   mergeFeedEnabled?: boolean
@@ -92,6 +95,7 @@ export interface FeedPostSlice {
   isIncompleteThread: boolean
   isFallbackMarker: boolean
   feedContext: string | undefined
+  reqId: string | undefined
   feedPostUri: string
   reason?:
     | AppBskyFeedDefs.ReasonRepost
@@ -316,6 +320,7 @@ export function usePostFeedQuery(
                     userActionHistory.seen(
                       slice.items.map(item => ({
                         feedContext: slice.feedContext,
+                        reqId: slice.reqId,
                         likeCount: item.post.likeCount ?? 0,
                         repostCount: item.post.repostCount ?? 0,
                         replyCount: item.post.replyCount ?? 0,
@@ -333,6 +338,7 @@ export function usePostFeedQuery(
                     isIncompleteThread: slice.isIncompleteThread,
                     isFallbackMarker: slice.isFallbackMarker,
                     feedContext: slice.feedContext,
+                    reqId: slice.reqId,
                     reason: slice.reason,
                     feedPostUri: slice.feedPostUri,
                     items: slice.items.map((item, i) => {
@@ -485,6 +491,9 @@ function createApi({
   } else if (feedDesc.startsWith('list')) {
     const [_, list] = feedDesc.split('|')
     return new ListFeedAPI({agent, feedParams: {list}})
+  } else if (feedDesc.startsWith('posts')) {
+    const [_, uriList] = feedDesc.split('|')
+    return new PostListFeedAPI({agent, feedParams: {uris: uriList.split(',')}})
   } else if (feedDesc === 'demo') {
     return new DemoFeedAPI({agent})
   } else {
